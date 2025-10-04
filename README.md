@@ -38,38 +38,6 @@ How it works
 	generating a reading (via `src/utils/language_model.py`) and stores the
 - The bot monitors Redis for completion and sends the reading to the user.
 
-Running the worker (optional)
-If you want to offload reading generation to an asynchronous worker, run
-`consumer.py` (it expects Event Hub configuration):
-
-```pwsh
-If you don't use Event Hub, you can still call `generate_reading()` directly
-from the bot (the project is flexible). The `language_model` supports a
-template fallback when no LLM key is configured.
-Troubleshooting
----------------
-
-- aioredis errors: this project uses `redis.asyncio` (redis-py) — make sure
-	`redis>=4.6.0` is installed. If you previously had `aioredis` installed,
-- Redis URL errors: supply a proper URL in `.env`; `host:port` without
-	scheme will be normalized automatically but prefer the full `redis://` URL.
-- LLM timeouts: the language model client uses a timeout; check network
-Developer notes
----------------
-
-- Core files:
-	- `src/telegram/bot.py` — main bot implementation
-- To add caching for user preferences, use `redis_client.store_token` or
-	add new fields to the task hash.
-- To extend astrology logic, update `src/utils/language_model.py` with more
-License & safety
-----------------
-
-This project is intended as an example scaffold. If you process user data
-ensure you comply with local privacy laws and secure your API keys. Don't
-commit `.env` containing secrets to source control — `.gitignore` already
-excludes `.env`.
-
 License
 -------
 This project is released under the MIT License. See the `LICENSE` file for details.
