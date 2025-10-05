@@ -12,11 +12,7 @@ from src.utils.logger import logger as log
 from src.utils.eventhub_utils import send_event, create_consumer
 from src.utils.redis_client import RedisClient
 import json
-import re
     
-# Conversation states
-WAITING_FOR_DOB = 1
-
 # Global Redis client
 redis_client = None
 
@@ -27,38 +23,26 @@ async def init_redis():
     redis_client = await RedisClient.create()
 
 
-def _parse_dob_arg(arg: str) -> str:
-    """Validate and normalize a date argument in YYYY-MM-DD format.
-
-    Raises ValueError on invalid input.
-    """
-    normalized = arg.replace('/', '-')
-    from datetime import datetime
-    dt = datetime.fromisoformat(normalized)
-    return dt.date().isoformat()
-
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle `/start` command - asks user for date of birth."""
+    """Handle `/start` command - starts conversation with user."""
     welcome_text = (
         "🌟 Welcome to AstroBot! 🌟\n\n"
-        "I can provide you with a personalized astrology reading based on your date of birth.\n\n"
-        "Please send me your date of birth in one of these formats:\n"
-        "• YYYY-MM-DD (e.g., 1990-05-23)\n"
-        "• YYYY/MM/DD (e.g., 1990/05/23)"
+        "I'm your conversational astrology assistant! You can ask me about:\n"
+        "• Your daily horoscope\n"
+        "• Astrology readings\n"
+        "• Zodiac sign insights\n"
+        "• Or anything else astrology-related!\n\n"
+        "Just send me a message and I'll help you! 🔮"
     )
     await update.message.reply_text(welcome_text)
-    return WAITING_FOR_DOB
 
 
-async def handle_dob_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle date of birth input from user."""
+async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle any user message and send to processing queue."""
     user_message = update.message.text.strip()
     user_id = str(update.effective_user.id)
     
     try:
-        dob = _parse_dob_arg(user_message)
-        
         # Generate unique correlation ID
         correlation_id = str(uuid.uuid4())
         
@@ -66,16 +50,16 @@ async def handle_dob_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         task_payload = {
             "correlation_id": correlation_id,
             "user_id": user_id,
-            "dob": dob,
+            "user_message": user_message,
             "timestamp": datetime.utcnow().isoformat(),
-            "type": "astrology_reading",
+            "type": "conversational_astrology",
             "status": "pending"
         }
         
         # Store pending task in Redis
         await redis_client.set_pending(
             correlation_id, 
-            str(task_payload), 
+            json.dumps(task_payload), 
             ttl=300  # 5 minutes TTL
         )
         
@@ -83,32 +67,21 @@ async def handle_dob_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_event(task_payload)
         
         await update.message.reply_text(
-            "🔮 Generating your astrology reading... This may take a few seconds."
+            "💫 Thinking about your question... This may take a few seconds."
         )
         
-        log.info(f"Dispatched task {correlation_id} for user {user_id} with DOB {dob}")
+        log.info(f"Dispatched conversational task {correlation_id} for user {user_id}")
 
         # Start monitoring for completion (non-blocking)
         asyncio.create_task(
             monitor_task_completion(correlation_id, update, context)
         )
         
-        return WAITING_FOR_DOB
-        
-    except ValueError as e:
-        log.error(f"Invalid date format: {e}")
-        await update.message.reply_text(
-            "I couldn't understand that as a date. Please use YYYY-MM-DD or YYYY/MM/DD format.\n"
-            "Example: 1990-05-23 or 1990/05/23\n\n"
-            "Please try again:"
-        )
-        return WAITING_FOR_DOB
     except Exception as e:
-        log.error(f"Failed to process DOB input: {e}")
+        log.error(f"Failed to process user message: {e}")
         await update.message.reply_text(
-            "Sorry, I encountered an error processing your request. Please try again."
+            "Sorry, I encountered an error processing your message. Please try again."
         )
-        return WAITING_FOR_DOB
 
 
 async def monitor_task_completion(correlation_id: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,14 +98,11 @@ async def monitor_task_completion(correlation_id: str, update: Update, context: 
             if status == "completed":
                 result = await redis_client.get_result(correlation_id)
                 if result:
-                    await update.message.reply_text(
-                        f"🌟 Your Astrology Reading 🌟\n\n{result}\n\n"
-                        "Would you like another reading? Just send me another date!"
-                    )
+                    await update.message.reply_text(result)
                     return
                 else:
                     await update.message.reply_text(
-                        "Sorry, I couldn't generate your reading. Please try again with another date."
+                        "Sorry, I couldn't generate a response. Please try again with a different question."
                     )
                     return
             elif status == "pending":
@@ -148,37 +118,8 @@ async def monitor_task_completion(correlation_id: str, update: Update, context: 
     
     # Timeout or error
     await update.message.reply_text(
-        "Sorry, the reading generation took too long. Please try again with /start"
+        "Sorry, the response generation took too long. Please try again with your question."
     )
-
-
-async def handle_other_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle other messages that are not DOB inputs."""
-    user_message = update.message.text.strip()
-    
-    log.info(f"Received non-DOB message: {user_message}")
-
-    if re.match(r'^\d{4}[-/]\d{2}[-/]\d{2}$', user_message):
-        # Treat as DOB input
-        return await handle_dob_input(update, context)
-
-    response_text = (
-        "I'd love to give you an astrology reading! 🌟\n\n"
-        "Please send me your date of birth in YYYY-MM-DD format.\n"
-        "Example: 1990-05-23 or 1990/05/23"
-    )
-    log.info("Prompting user for DOB")
-
-    await update.message.reply_text(response_text)
-    return WAITING_FOR_DOB
-
-
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel the conversation."""
-    await update.message.reply_text(
-        "Okay! If you want an astrology reading later, just send /start anytime! 🌟"
-    )
-    return ConversationHandler.END
 
 
 async def start_result_consumer():
@@ -234,20 +175,9 @@ def run_bot():
 
     app = ApplicationBuilder().token(Config.TELEGRAM_BOT_TOKEN).build()
     
-    # Set up conversation handler
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start_command)],
-        states={
-            WAITING_FOR_DOB: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_dob_input)
-            ],
-        },
-        fallbacks=[CommandHandler('cancel', cancel_command)]
-    )
-    
     # Add handlers
-    app.add_handler(conv_handler)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_other_messages))
+    app.add_handler(CommandHandler('start', start_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_message))
     
-    log.info("Starting AstroBot Telegram bot with Event Hub integration")
+    log.info("Starting Conversational AstroBot Telegram bot with Event Hub integration")
     app.run_polling()

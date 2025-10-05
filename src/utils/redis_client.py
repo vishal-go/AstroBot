@@ -95,3 +95,11 @@ class RedisClient:
         status = await self.get_status(correlation_id)
         return status == "pending"
     
+    async def set_attr(self, key: str, field: str, value: str):
+        """Set a hash field to a value."""
+        await self._redis.hset(key, field, value)
+    
+    async def get_attr(self, key: str, field: str) -> Optional[str]:
+        """Get a hash field value."""
+        return await self._redis.hget(key, field)
+    

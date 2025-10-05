@@ -1,4 +1,4 @@
-"""Worker module for processing astrology reading tasks.
+"""Worker module for processing conversational astrology tasks.
 
 Consumes tasks from Event Hub, processes them, and sends results back.
 """
@@ -14,6 +14,7 @@ from src.utils.logger import logger as log
 from src.utils.redis_client import RedisClient
 from src.utils.language_model import generate_reading
 from config import Config
+
 # Load environment variables
 load_dotenv()
 
@@ -23,27 +24,27 @@ if not Config.EVENTHUB_CONN_STR or not Config.EVENTHUB_NAME:
     raise ValueError("Missing required environment variables: CONNECTION_STR and EVENT_HUB_NAME must be set.")
 
 
-class AstrologyWorker:
+class ConversationalAstrologyWorker:
     def __init__(self):
         self.redis_client = None
 
     async def initialize(self):
         """Initialize Redis connection"""
         self.redis_client = await RedisClient.create()
-        log.info("AstrologyWorker initialized")
+        log.info("ConversationalAstrologyWorker initialized")
 
-    async def process_reading_task(self, task_data: dict):
-        """Process an astrology reading task."""
+    async def process_conversation_task(self, task_data: dict):
+        """Process a conversational astrology task."""
         correlation_id = task_data.get("correlation_id")
         user_id = task_data.get("user_id")
-        dob = task_data.get("dob")
+        user_message = task_data.get("user_message")
         
-        if not all([correlation_id, dob]):
+        if not all([correlation_id, user_id, user_message]):
             log.error(f"Invalid task data: {task_data}")
             return None
 
         try:
-            log.info(f"Processing astrology reading for {correlation_id}")
+            log.info(f"Processing conversational task {correlation_id} for user {user_id}")
             
             # Check if task is still pending using Redis
             status = await self.redis_client.get_status(correlation_id)
@@ -51,17 +52,17 @@ class AstrologyWorker:
                 log.warning(f"Task {correlation_id} is no longer pending (status: {status})")
                 return None
 
-            # Generate astrology reading
-            reading = await generate_reading(dob, None)
+            # Generate conversational response using context
+            response = await generate_reading(user_message, user_id, self.redis_client)
             
             # Create result payload
             result_payload = {
                 "correlation_id": correlation_id,
                 "user_id": user_id,
                 "status": "completed",
-                "result": reading,
+                "result": response,
                 "completed_at": datetime.utcnow().isoformat(),
-                "type": "astrology_reading_result"
+                "type": "conversational_astrology_result"
             }
             
             return result_payload
@@ -74,9 +75,9 @@ class AstrologyWorker:
                 "correlation_id": correlation_id,
                 "user_id": user_id,
                 "status": "error",
-                "result": "Sorry, I couldn't generate your astrology reading at this time.",
+                "result": "Sorry, I'm having trouble responding right now. Please try again in a moment.",
                 "completed_at": datetime.utcnow().isoformat(),
-                "type": "astrology_reading_result"
+                "type": "conversational_astrology_result"
             }
             return error_payload
 
@@ -86,15 +87,15 @@ class AstrologyWorker:
             event_data = json.loads(event.body_as_str())
             correlation_id = event_data.get("correlation_id")
             
-            # Only process astrology reading tasks that are pending
-            if (event_data.get("type") == "astrology_reading" and 
+            # Only process conversational astrology tasks that are pending
+            if (event_data.get("type") == "conversational_astrology" and 
                 event_data.get("status") == "pending" and 
                 await self.redis_client.is_pending(correlation_id)):
                 
-                log.info(f"Processing astrology reading task: {correlation_id}")
+                log.info(f"Processing conversational task: {correlation_id}")
 
                 # Process the task
-                result = await self.process_reading_task(event_data)
+                result = await self.process_conversation_task(event_data)
                 
                 if result:
                     # Send result back to Event Hub
@@ -106,17 +107,15 @@ class AstrologyWorker:
                         event_data_batch = await producer.create_batch()
                         event_data_batch.add(EventData(json.dumps(result)))
                         await producer.send_batch(event_data_batch)
-                        log.info(f"Sent processed event: {result}")
+                        log.info(f"Sent processed event for {correlation_id}")
 
                     # Update Redis status
-                    if result["status"] == "completed":
-                        await self.redis_client.set_result(correlation_id, result["result"])
-                    elif result["status"] == "error":
+                    if result["status"] in ["completed", "error"]:
                         await self.redis_client.set_result(correlation_id, result["result"])
                 
                 await partition_context.update_checkpoint(event)
             else:
-                log.info(f"Skipping event: Not a pending astrology reading request or invalid correlation_id: {correlation_id}")
+                log.info(f"Skipping event: Not a pending conversational request or invalid correlation_id: {correlation_id}")
 
         except json.JSONDecodeError as e:
             log.error(f"Failed to parse event data: {e}")
@@ -141,8 +140,8 @@ class AstrologyWorker:
 
 
 def run_worker():
-    """Start the astrology worker."""
-    worker = AstrologyWorker()
+    """Start the conversational astrology worker."""
+    worker = ConversationalAstrologyWorker()
     try:
         asyncio.run(worker.main())
     except ValueError as ve:
