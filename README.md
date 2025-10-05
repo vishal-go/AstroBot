@@ -1,98 +1,201 @@
+# 🌌 **AstroBot**
 
-# AstroBot
+**AstroBot** is a **conversational astrology assistant** powered by AI and designed for seamless scalability.
+It runs as a **Telegram bot** that communicates through **Azure Event Hub** and **Redis**, enabling async, distributed processing of astrology-related queries.
 
-AstroBot is a conversational astrology assistant that runs as a Telegram bot. It uses an LLM (via OpenRouter), Azure Event Hubs for task streaming, and Redis for lightweight task coordination and conversation history.
+---
 
-This repository contains a simple worker (`consumer.py`) that processes tasks from Event Hub and a Telegram bot (`app.py` / `src/telegram/bot.py`) that enqueues user messages and returns results.
+## ✨ **Features**
 
-## Features
+* 🔮 Conversational astrology responses with **contextual memory**
+* ⚡ Asynchronous **task queuing** via **Azure Event Hub**
+* 🧠 Redis-backed **task state** and **conversation history**
+* 🧩 Modular architecture with separate **worker process** for scalability
+* 💬 Integrated with **OpenRouter** for LLM-powered astrology readings
 
-- Conversational astrology responses with contextual history
-- Asynchronous task queueing using Azure Event Hub
-- Redis-backed task state and conversation storage
-- Separate worker process for scalable processing
+---
 
-## Requirements
+## ⚙️ **Architecture Overview**
 
-- Python 3.11+ recommended
-- Windows/macOS/Linux supported
-- Redis instance (hosted or local)
-- Azure Event Hub namespace and event hub
-- Telegram bot token
+AstroBot consists of three main components:
 
-Install dependencies from `requirements.txt` (preferably inside a virtual environment):
+| Component                   | Description                                                                                   |
+| --------------------------- | --------------------------------------------------------------------------------------------- |
+| **Telegram Bot (`app.py`)** | Receives user messages, enqueues them into Event Hub, and monitors Redis for completion.      |
+| **Worker (`consumer.py`)**  | Listens to Event Hub for pending tasks, processes them using the LLM, and sends results back. |
+| **Redis**                   | Stores pending/completed task states and user conversation history.                           |
 
-```powershell
-# Create venv (Windows PowerShell)
-python -m venv env
-env\Scripts\Activate.ps1
-pip install -r requirements.txt
+---
+
+## 🧭 **Flow Diagram**
+
+```mermaid
+sequenceDiagram
+    participant User as 🧑 User (Telegram)
+    participant Bot as 🤖 AstroBot (Telegram Bot)
+    participant EH as ☁️ Azure Event Hub
+    participant Redis as 🧠 Redis
+    participant Worker as ⚙️ Worker (LLM Processor)
+    participant LLM as 🔮 LLM API (OpenRouter)
+
+    User->>Bot: Sends astrology question
+    Bot->>Redis: Save task as "pending"
+    Bot->>EH: Publish task message
+    Bot-->>User: "Thinking about your question..."
+    
+    EH->>Worker: Deliver task event
+    Worker->>Redis: Check if task is pending
+    Worker->>LLM: Generate astrology response
+    LLM-->>Worker: Return response
+    Worker->>Redis: Update task as "completed"
+    Worker->>EH: Publish result event
+    
+    EH->>Bot: Deliver result event
+    Bot->>Redis: Store completed result
+    Bot-->>User: Sends astrology reply ✨
 ```
 
-## Configuration
+---
 
-Copy `example.env` to `.env` and fill in the required values, or set environment variables directly.
+## 🧩 **Requirements**
 
-Required variables (in `.env` or environment):
+* Python **3.11+**
+* Works on **Windows/macOS/Linux**
+* **Redis** instance (local or cloud)
+* **Azure Event Hub** namespace and event hub
+* **Telegram Bot Token**
+* **OpenRouter API Key** (for AI-based astrology responses)
 
-- `TELEGRAM_BOT_TOKEN` - Telegram Bot API token
-- `OPENROUTER_API_KEY` - API key for the LLM provider (OpenRouter-compatible)
-- `DEFAULT_LLM_MODEL` - Optional: default model to request from the LLM
-- `REDIS_URL` - Redis connection string (e.g. `redis://user:pass@host:port`)
-- `CONNECTION_STR` - Azure Service Bus / Event Hub connection string
-- `EVENT_HUB_NAME` - Event Hub name
+---
 
-The repository already includes a `.env` file for quick local testing; be sure to replace sensitive values with your own and do not commit secrets.
+## 🚀 **Installation**
 
-## Running the Telegram bot (development)
+1. **Clone the repository:**
 
-Start the bot which listens for Telegram messages and enqueues tasks:
+   ```bash
+   git clone https://github.com/yourusername/astrobot.git
+   cd astrobot
+   ```
 
-```powershell
-# Ensure your virtual env is activated
+2. **Set up a virtual environment:**
+
+   ```powershell
+   python -m venv env
+   env\Scripts\Activate.ps1    # On Windows
+   # OR
+   source env/bin/activate     # On macOS/Linux
+   ```
+
+3. **Install dependencies:**
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+---
+
+## 🔧 **Configuration**
+
+Copy the example environment file and set your own values:
+
+```bash
+cp example.env .env
+```
+
+### Required Environment Variables
+
+| Variable             | Description                                   |
+| -------------------- | --------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN` | Telegram Bot API token                        |
+| `OPENROUTER_API_KEY` | API key for LLM provider (e.g., OpenRouter)   |
+| `DEFAULT_LLM_MODEL`  | Default LLM model to use                      |
+| `REDIS_URL`          | Redis connection string (`redis://host:port`) |
+| `CONNECTION_STR`     | Azure Event Hub connection string             |
+| `EVENT_HUB_NAME`     | Event Hub name                                |
+
+> ⚠️ **Never commit `.env` or secrets** to version control.
+
+---
+
+## 💬 **Conversational Flow Example**
+
+**User:**
+
+> "What does my day look like for Leo?"
+
+**AstroBot:**
+
+> "✨ The stars encourage you to trust your instincts today, Leo!
+> Focus on communication and balance—especially in relationships.
+> A small decision could lead to a meaningful opportunity. 🌟"
+
+---
+
+## ▶️ **Running the Bot**
+
+Start the Telegram bot that listens to user messages and enqueues tasks:
+
+```bash
 python app.py
 ```
 
-The bot uses `src/telegram/bot.py` and will register handlers for `/start` and user messages.
+The bot will:
 
-## Running the worker
+* Accept user messages
+* Create a task and store it in Redis
+* Publish it to Event Hub for the worker to process
 
-The worker listens to Event Hub for tasks, generates responses using the LLM, and writes results back (also via Event Hub/Redis depending on configuration):
+---
 
-```powershell
+## ⚙️ **Running the Worker**
+
+The worker consumes events from Event Hub, generates responses using the LLM, and pushes results back:
+
+```bash
 python consumer.py
 ```
 
-Run the worker in a separate terminal or server (it uses `asyncio.run`).
+The worker runs asynchronously and can be deployed separately (for example, on Azure, AWS, or any VM).
 
-## Development notes
+---
 
-- Logging is configured in `src/utils/logger.py` and writes to stdout.
-- Redis helper is at `src/utils/redis_client.py`.
-- Event Hub helpers are at `src/utils/eventhub_utils.py`.
-- Conversational logic and LLM integration is implemented in `src/utils/language_model.py`.
+## 🧰 **Development Notes**
 
-## Troubleshooting
+* **Logging:** Configured in `src/utils/logger.py`
+* **Redis Client:** `src/utils/redis_client.py`
+* **Event Hub Helpers:** `src/utils/eventhub_utils.py`
+* **Conversational Engine:** `src/utils/language_model.py`
 
-- If the bot doesn't start, confirm `TELEGRAM_BOT_TOKEN` is set and valid.
-- If Event Hub code raises configuration errors, check `CONNECTION_STR` and `EVENT_HUB_NAME`.
-- For Redis connection issues, verify `REDIS_URL` and that the Redis instance is reachable from your environment.
+---
 
-Useful debugging tips:
+## 🩺 **Troubleshooting**
 
-- Tail logs in the console; increase logging to DEBUG in `src/utils/logger.py` by setting `logger.setLevel(logging.DEBUG)`.
-- Use `redis-cli` or a GUI Redis client to inspect keys like `task:<correlation_id>`.
+| Issue                  | Possible Cause               | Fix                                           |
+| ---------------------- | ---------------------------- | --------------------------------------------- |
+| Bot not starting       | Missing `TELEGRAM_BOT_TOKEN` | Check `.env`                                  |
+| Redis connection error | Invalid `REDIS_URL`          | Ensure Redis is running and accessible        |
+| Event Hub errors       | Wrong connection string      | Check `CONNECTION_STR` and `EVENT_HUB_NAME`   |
+| No response            | LLM timeout or API error     | Check `OPENROUTER_API_KEY` and network access |
 
-## Security
+> 🪄 Use `redis-cli` to inspect keys like `task:<correlation_id>` for debugging.
 
-- Keep API keys and tokens out of source control. Use environment variables or a secrets manager.
-- The included `.env` is for local testing only and is listed in `.gitignore`.
+---
 
-## Contributing
+## 🔐 **Security Tips**
 
-Issues and pull requests welcome. Follow the standard GitHub flow and include tests for new logic where appropriate.
+* Keep all API keys in environment variables (not in code)
+* Use `.env` for local dev only — secrets should be managed securely
+* Use HTTPS endpoints for all API communication
 
-## License
+---
 
-MIT License — see `LICENSE`.
+## 🤝 **Contributing**
 
+Pull requests are welcome!
+Please open an issue first to discuss what you’d like to change or improve.
+
+---
+
+## 📜 **License**
+
+**MIT License** — see the [`LICENSE`](LICENSE) file for details.
